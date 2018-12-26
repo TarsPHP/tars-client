@@ -63,9 +63,14 @@ class Communicator
             $this->_queryF = new QueryFWrapper($this->_locator, $this->_socketMode, $this->_refreshEndpointInterval);
             $this->_routeInfo = $this->_queryF->findObjectById($this->_servantName);
             // 初始化上报组件,只在指定了主控的前提下
-            $reportInterval = empty($config->getReportInterval()) ? 60000 : $config->getReportInterval();
-            $this->_statF = new StatFWrapper($this->_locator, $this->_socketMode,
-                $this->_statServantName, $this->_moduleName, $reportInterval);
+            if(class_exists("\Tars\App")) {
+                $this->_statF = \Tars\App::getStatF();
+            }
+            else {
+                $reportInterval = empty($config->getReportInterval()) ? 60000 : $config->getReportInterval();
+                $this->_statF = new StatFWrapper($this->_locator, $this->_socketMode,
+                    $this->_statServantName, $this->_moduleName, $reportInterval);
+            }
         }
 
     }
