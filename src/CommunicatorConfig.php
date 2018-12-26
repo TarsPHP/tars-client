@@ -37,7 +37,7 @@ class CommunicatorConfig
     protected $localip;
 
     protected $socketMode = 1; //1 socket ,2 swoole sync ,3 swoole coroutine
-    protected $iVersion = 3;
+    protected $iVersion = 1;
 
     public function __construct()
     {
