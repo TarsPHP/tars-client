@@ -1,7 +1,7 @@
 {
     "name": "phptars/tars-client",
     "description": "tars的php-client能力",
-    "version":"0.2.1",
+    "version":"0.2.2",
     "authors": [
         {
             "name": "Chen Liang",
@@ -16,8 +16,8 @@
     "require": {
         "php": ">=5.3",
         "phptars/tars-registry": "~0.1",
-        "phptars/tars-monitor": "~0.2.1",
-        "phptars/tars-utils": "~0.2.0"
+        "phptars/tars-monitor": "~0.2",
+        "phptars/tars-utils": "~0.2"
 
     },
     "autoload": {
