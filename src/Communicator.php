@@ -27,7 +27,8 @@ class Communicator
 
     protected $_routeInfo;
 
-    protected $_socketMode; //1 socket ,2 swoole sync ,3 swoole coroutine
+    protected $_socketMode; //1 socket ,2 swoole sync ,3 swoole coroutine, 4 grpc
+    protected $_routeSocketMode; //1 socket ,2 swoole sync ,3 swoole coroutine
     protected $_iVersion;
 
     // monitorHelper?
@@ -48,6 +49,8 @@ class Communicator
         $this->_enableset = $config->isEnableSet();
 
         $this->_socketMode = $config->getSocketMode();
+        $this->_routeSocketMode = $config->getSocketMode() == 4 ? 3 : $config->getSocketMode(); //如果是grpc方式 路由还是用 协程tcp
+
         $this->_iVersion = $config->getIVersion();
 
         $this->_statServantName = $config->getStat();
@@ -60,7 +63,7 @@ class Communicator
             $this->_routeInfo = $config->getRouteInfo();
         } else {
             // 完成服务的路由
-            $this->_queryF = new QueryFWrapper($this->_locator, $this->_socketMode, $this->_refreshEndpointInterval);
+            $this->_queryF = new QueryFWrapper($this->_locator, $this->_routeSocketMode, $this->_refreshEndpointInterval);
             $this->_routeInfo = $this->_queryF->findObjectById($this->_servantName);
             // 初始化上报组件,只在指定了主控的前提下
             if(class_exists("\Tars\App")) {
@@ -68,7 +71,7 @@ class Communicator
             }
             else {
                 $reportInterval = empty($config->getReportInterval()) ? 60000 : $config->getReportInterval();
-                $this->_statF = new StatFWrapper($this->_locator, $this->_socketMode,
+                $this->_statF = new StatFWrapper($this->_locator, $this->_routeSocketMode,
                     $this->_statServantName, $this->_moduleName, $reportInterval);
             }
         }
@@ -76,7 +79,7 @@ class Communicator
     }
 
     // 同步的socket tcp收发
-    public function invoke(RequestPacket $requestPacket, $timeout, $sIp = '', $iPort = 0)
+    public function invoke(RequestPacket $requestPacket, $timeout, $responsePacket = null, $sIp = '', $iPort = 0)
     {
         // 转换成网络需要的timeout
         $timeout = $timeout / 1000;
@@ -113,6 +116,10 @@ class Communicator
                             $requestBuf, $timeout);
                         break;
                     }
+                    case 4:{
+                        $responseBuf = $this->swoolGrpc($ip, $port, $requestBuf, $timeout, $requestPacket->getPath());
+                        break;
+                    }
                 }
             } else {
                 switch ($this->_socketMode) {
@@ -132,7 +139,7 @@ class Communicator
                 }
             }
 
-            $responsePacket = new ResponsePacket();
+            $responsePacket = $responsePacket ? $responsePacket : new ResponsePacket();
             $responsePacket->_responseBuf = $responseBuf;
             $responsePacket->iVersion = $this->_iVersion;
             $sBuffer = $responsePacket->decode();
@@ -450,6 +457,31 @@ class Communicator
         }
 
         return $responseBuf;
+    }
+
+    private function swoolGrpc($ip, $port, $requestBuf, $timeout, $path)
+    {
+        $cli = new \Swoole\Coroutine\Http2\Client($ip, $port, false);
+        $cli->set([
+            'timeout' => $timeout
+        ]);
+        $cli->connect();
+        $req = new \swoole_http2_request;
+        $req->method = 'POST';
+        $req->path = $path;
+        $req->headers = [
+            "user-agent" => 'grpc-c/7.0.0 (linux; chttp2; gale)',
+            "content-type" => "application/grpc",
+            "grpc-accept-encoding" => "identity,deflate,gzip",
+            "accept-encoding" => "identity,gzip",
+            "te" => "trailers",
+        ];
+        $req->pipeline = false;
+        $req->data = $requestBuf;
+
+        $cli->send($req);
+        $response = $cli->recv();
+        return $response->data;
     }
 
     private function militime()

@@ -46,3 +46,7 @@ $config = new \Tars\client\CommunicatorConfig();
 $config->setRouteInfo($routeInfo);
 ```
 其他用法同自动寻址相同
+
+## Changelog
+### v0.3.0(2019-07-30)
+- 支持调用protobuf的服务
