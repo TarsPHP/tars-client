@@ -13,8 +13,8 @@ class CommunicatorConfig
     protected $locator = null;
     // 包含一组ip,非空说明不需要进行主控寻址了
     protected $routeInfo;
-
-    protected $enableTimer; //是否启用swooletable+server的定时能力
+    //是否启用swooletable+server的定时能力
+    protected $enableTimer;
 
     protected $syncInvokeTimeout = 3000;
     protected $asyncInvokeTimeout = 3000;
@@ -36,8 +36,14 @@ class CommunicatorConfig
     protected $dataPath;
     protected $localip;
 
-    protected $socketMode = 1; //1 socket ,2 swoole sync ,3 swoole coroutine
+    //1 socket ,2 swoole sync ,3 swoole coroutine
+    protected $socketMode = 1;
     protected $iVersion = 1;
+
+    // filter related config
+    public $preFilters;
+    public $postFilters;
+
 
     public function __construct()
     {

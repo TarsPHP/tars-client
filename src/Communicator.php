@@ -13,70 +13,53 @@ use Tars\registry\QueryFWrapper;
 
 class Communicator
 {
-    protected $_moduleName;
-    protected $_servantName;
-
-    protected $_localIp;
-    protected $_locator;
-    protected $_sIp;
-    protected $_iPort;
-
-    protected $_timeout;
-    protected $_setdivision;
-    protected $_enableset;
-
+    // endpoints info which contains ip and port
+    protected $_socketMode;
     protected $_routeInfo;
 
-    protected $_socketMode; //1 socket ,2 swoole sync ,3 swoole coroutine
-    protected $_iVersion;
-
-    // monitorHelper?
+    // monitorHelper to report stats
     protected $_statF;
-    protected $_statServantName;
-    // registrHelper?
+    // register Helper to query endpoints
     protected $_queryF;
-    protected $_refreshEndpointInterval;
+    // config for the communicator
+    protected $_config;
 
     public function __construct(CommunicatorConfig $config)
     {
-        $this->_moduleName = $config->getModuleName();
-        $this->_servantName = $config->getServantName();
-        $this->_localIp = $config->getLocalip();
-        $this->_locator = $config->getLocator();
-        $this->_timeout = $config->getConnectTimeout();
-        $this->_setdivision = $config->getSetDivision();
-        $this->_enableset = $config->isEnableSet();
+        $this->_config = $config;
+        $this->_socketMode = $this->_config->getSocketMode();
 
-        $this->_socketMode = $config->getSocketMode();
-        $this->_iVersion = $config->getIVersion();
-
-        $this->_statServantName = $config->getStat();
-
-        $this->_refreshEndpointInterval = empty($config->getRefreshEndpointInterval())
+        $refreshEndpointInterval = empty($config->getRefreshEndpointInterval())
             ? 60000 : $config->getRefreshEndpointInterval();
+        $reportInterval = empty($this->_config->getReportInterval())
+            ? 60000 : $config->getReportInterval();
+        $servantName = $this->_config->getServantName();
+        $moduleName = $this->_config->getModuleName();
+        $locator = $this->_config->getLocator();
 
         // 如果已经有配置的地址的话,直接选用
         if (!empty($config->getRouteInfo())) {
             $this->_routeInfo = $config->getRouteInfo();
         } else {
             // 完成服务的路由
-            $this->_queryF = new QueryFWrapper($this->_locator, $this->_socketMode, $this->_refreshEndpointInterval);
-            $this->_routeInfo = $this->_queryF->findObjectById($this->_servantName);
+            $this->_queryF = new QueryFWrapper($locator, $this->_socketMode,
+                $refreshEndpointInterval);
+            $this->_routeInfo = $this->_queryF->findObjectById($servantName);
             // 初始化上报组件,只在指定了主控的前提下
             if(class_exists("\Tars\App")) {
                 $this->_statF = \Tars\App::getStatF();
             }
             else {
-                $reportInterval = empty($config->getReportInterval()) ? 60000 : $config->getReportInterval();
-                $this->_statF = new StatFWrapper($this->_locator, $this->_socketMode,
-                    $this->_statServantName, $this->_moduleName, $reportInterval);
+                $this->_statF = new StatFWrapper($locator, $this->_socketMode,
+                    $this->_config->getStat(), $moduleName, $reportInterval);
             }
         }
 
     }
 
     // 同步的socket tcp收发
-    public function invoke(RequestPacket $requestPacket, $timeout, $sIp = '', $iPort = 0)
+    public function invoke(RequestPacket $requestPacket, $timeout,
+        $sIp = '', $iPort = 0)
     {
         // 转换成网络需要的timeout
         $timeout = $timeout / 1000;
@@ -87,10 +70,21 @@ class Communicator
             throw new \Exception('Rout fail', Code::ROUTE_FAIL);
         }
         $index = rand(0, $count);
-        $ip = empty($sIp) ? $this->_routeInfo[$index]['sIp'] : $sIp;
-        $port = empty($iPort) ? $this->_routeInfo[$index]['iPort'] : $iPort;
+        $sIp = empty($sIp) ? $this->_routeInfo[$index]['sIp'] : $sIp;
+        $iPort = empty($iPort) ? $this->_routeInfo[$index]['iPort'] : $iPort;
         $bTcp = isset($this->_routeInfo[$index]['bTcp']) ?
             $this->_routeInfo[$index]['bTcp'] : 1;
+
+        $preFilters = $this->_config->preFilters;
+        if (!empty($preFilters)) {
+            $clientRequest = new ClientRequest($requestPacket, $timeout,
+                $sIp, $iPort);
+            foreach ($preFilters as $filterClass) {
+                // call each filter and pass clientRequest as reference
+                call_user_func(array($filterClass, "filter"), $clientRequest);
+            }
+            $requestPacket = $clientRequest->requestPacket;
+        }
 
         try {
             $requestBuf = $requestPacket->encode();
@@ -99,17 +93,17 @@ class Communicator
                 switch ($this->_socketMode) {
                     // 单纯的socket
                     case 1:{
-                        $responseBuf = $this->socketTcp($ip, $port,
+                        $responseBuf = $this->socketTcp($sIp, $iPort,
                             $requestBuf, $timeout);
                         break;
                     }
                     case 2:{
-                        $responseBuf = $this->swooleTcp($ip, $port,
+                        $responseBuf = $this->swooleTcp($sIp, $iPort,
                             $requestBuf, $timeout);
                         break;
                     }
                     case 3:{
-                        $responseBuf = $this->swooleCoroutineTcp($ip, $port,
+                        $responseBuf = $this->swooleCoroutineTcp($sIp, $iPort,
                             $requestBuf, $timeout);
                         break;
                     }
@@ -118,15 +112,15 @@ class Communicator
                 switch ($this->_socketMode) {
                     // 单纯的socket
                     case 1:{
-                        $responseBuf = $this->socketUdp($ip, $port, $requestBuf, $timeout);
+                        $responseBuf = $this->socketUdp($sIp, $iPort, $requestBuf, $timeout);
                         break;
                     }
                     case 2:{
-                        $responseBuf = $this->swooleUdp($ip, $port, $requestBuf, $timeout);
+                        $responseBuf = $this->swooleUdp($sIp, $iPort, $requestBuf, $timeout);
                         break;
                     }
                     case 3:{
-                        $responseBuf = $this->swooleCoroutineUdp($ip, $port, $requestBuf, $timeout);
+                        $responseBuf = $this->swooleCoroutineUdp($sIp, $iPort, $requestBuf, $timeout);
                         break;
                     }
                 }
@@ -134,25 +128,36 @@ class Communicator
 
             $responsePacket = new ResponsePacket();
             $responsePacket->_responseBuf = $responseBuf;
-            $responsePacket->iVersion = $this->_iVersion;
-            $sBuffer = $responsePacket->decode();
+            $responsePacket->iVersion = $this->_config->getIVersion();;
 
             $endTime = $this->militime();
-
-            if(!is_null($this->_locator))
+            $elapsedTime = $endTime - $startTime;
+            if(!is_null($this->_config->getLocator()))
             {
-                $this->_statF->addStat($requestPacket->_servantName, $requestPacket->_funcName, $ip,
-                    $port, ($endTime - $startTime), 0, 0);
+                $this->_statF->addStat($requestPacket->_servantName, $requestPacket->_funcName, $sIp,
+                    $iPort, $elapsedTime, 0, 0);
             }
 
+            // todo 似乎静态方法更好一些
+            $postFilters = $this->_config->postFilters;
+            if (!empty($postFilters)) {
+                $clientResponse = new ClientResponse($responsePacket, $elapsedTime);
+                foreach ($postFilters as $filterClass) {
+                    // call each filter and pass clientRequest as reference
+                    call_user_func(array($filterClass, "filter"), $clientResponse);
+                }
+                $responsePacket = $clientResponse->responsePacket;
+            }
+
+            $sBuffer = $responsePacket->decode();
             return $sBuffer;
         } catch (\Exception $e) {
             $endTime = $this->militime();
 
-            if(!is_null($this->_locator))
+            if(!is_null($this->_config->getLocator()))
             {
-                $this->_statF->addStat($requestPacket->_servantName, $requestPacket->_funcName, $ip,
-                    $port, ($endTime - $startTime), $e->getCode(), $e->getCode());
+                $this->_statF->addStat($requestPacket->_servantName, $requestPacket->_funcName, $sIp,
+                    $iPort, ($endTime - $startTime), $e->getCode(), $e->getCode());
             }
             throw $e;
         }
