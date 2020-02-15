@@ -334,4 +334,24 @@ class CommunicatorConfig
     {
         $this->enableTimer = $enableTimer;
     }
+
+    public function setPreFilters($preFilters)
+    {
+        $this->preFilters = $preFilters;
+    }
+
+    public function getPreFilters()
+    {
+        return $this->preFilters;
+    }
+
+    public function setPostFilters($preFilters)
+    {
+        $this->preFilters = $preFilters;
+    }
+
+    public function getPostFilters()
+    {
+        return $this->postFilters;
+    }
 }

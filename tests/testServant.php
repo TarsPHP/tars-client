@@ -36,3 +36,17 @@ echo "Service ip and port specified with socket mode 2 (swoole client)\n";
 $name = 'ted';
 $intVal = $servant->sayHelloWorld($name, $greetings);
 var_dump($greetings);
+
+// 增加前置和后置的filter
+$config = new \Tars\client\CommunicatorConfig();
+$config->setLocator('tars.tarsregistry.QueryObj@tcp -h 127.0.0.1 -p 17890');
+$config->setModuleName('App.Server');
+$config->setCharsetName('UTF-8');
+
+$preFilter = new ZipkinPreFilter();
+$postFilter = new ZipkinPostFilter();
+$config->preFilters[] = $preFilter;
+$config->postFilters[] = $postFilter;
+
+$servant = new \PHPTest\PHPServer\obj\TestTafServiceServant($config);
+$intVal = $servant->sayHelloWorld($name, $greetings);

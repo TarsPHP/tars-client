@@ -81,7 +81,7 @@ class Communicator
                 $sIp, $iPort);
             foreach ($preFilters as $filterClass) {
                 // call each filter and pass clientRequest as reference
-                call_user_func(array($filterClass, "filter"), $clientRequest);
+                call_user_func(array($filterClass, "doFilter"), $clientRequest);
             }
             $requestPacket = $clientRequest->requestPacket;
         }
