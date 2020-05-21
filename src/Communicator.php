@@ -38,6 +38,9 @@ class Communicator
     protected $_queryF;
     protected $_refreshEndpointInterval;
 
+    protected $_socketSsl;
+    protected $_socketOptions;
+
     public function __construct(CommunicatorConfig $config)
     {
         $this->_moduleName = $config->getModuleName();
@@ -57,6 +60,9 @@ class Communicator
 
         $this->_refreshEndpointInterval = empty($config->getRefreshEndpointInterval())
             ? 60000 : $config->getRefreshEndpointInterval();
+
+        $this->_socketSsl = $config->isSocketSsl();
+        $this->_socketOptions = $config->getSocketOptions();
 
         // 如果已经有配置的地址的话,直接选用
         if (!empty($config->getRouteInfo())) {
@@ -102,8 +108,12 @@ class Communicator
                 switch ($this->_socketMode) {
                     // 单纯的socket
                     case 1:{
-                        $responseBuf = $this->socketTcp($ip, $port,
-                            $requestBuf, $timeout);
+                        if ($this->_socketSsl) {
+                            $responseBuf = $this->socketSslTcp($ip, $port, $requestBuf, $timeout);
+                        } else {
+                            $responseBuf = $this->socketTcp($ip, $port,
+                                $requestBuf, $timeout);
+                        }
                         break;
                     }
                     case 2:{
@@ -220,6 +230,57 @@ class Communicator
         return $responseBuf;
     }
 
+    private function socketSslTcp($sIp, $iPort, $requestBuf, $timeout = 2)
+    {
+        $time = microtime(true);
+//        $contextOptions = [
+//            'ssl' => [
+//                'local_cert' => '',
+//                'local_pk' => '',
+//                'verify_peer' => false,
+//                'verify_peer_name' => false,
+//                'cafile' => ''
+//            ]
+//        ];
+        $defaultSetting = [];
+        $setting = array_merge($this->_socketOptions, $defaultSetting);
+        $context = stream_context_create($setting);
+        $fp = stream_socket_client("ssl://$sIp:$iPort", $errno, $errstr, $timeout, STREAM_CLIENT_CONNECT, $context);
+        if (!$fp) {
+            throw new \Exception();
+        }
+        fwrite($fp, $requestBuf);
+        $totalLen = 0;
+        $responseBuf = null;
+        while (true) {
+            if (microtime(true) - $time > $timeout) {
+                fclose($fp);
+                throw new \Exception();
+            }
+            $data = fread($fp, 65536);
+            if (empty($data)) {
+                return '';
+            } else {
+                //第一个包
+                if ($responseBuf === null) {
+                    $responseBuf = $data;
+                    //在这里从第一个包中获取总包长
+                    $list = unpack('Nlen', substr($data, 0, 4));
+                    $totalLen = $list['len'];
+                } else {
+                    $responseBuf .= $data;
+                }
+
+                //check if all package is receved
+                if (strlen($responseBuf) >= $totalLen) {
+                    fclose($fp);
+                    break;
+                }
+            }
+        }
+        return $responseBuf;
+    }
+
     private function socketUdp($sIp, $iPort, $requestBuf, $timeout = 2)
     {
         $time = microtime(true);
@@ -285,15 +346,22 @@ class Communicator
     }
     private function swooleTcp($sIp, $iPort, $requestBuf, $timeout = 2)
     {
-        $client = new \swoole_client(SWOOLE_SOCK_TCP | SWOOLE_KEEP);
+        $type = SWOOLE_SOCK_TCP | SWOOLE_KEEP;
 
-        $client->set(array(
+        if ($this->_socketSsl) {
+            $type = $type | SWOOLE_SSL;
+        }
+        $client = new \swoole_client($type);
+
+        $defaultSetting = [
             'open_length_check' => 1,
             'package_length_type' => 'N',
             'package_length_offset' => 0,       //第N个字节是包长度的值
             'package_body_offset' => 0,       //第几个字节开始计算长度
             'package_max_length' => 2000000,  //协议最大长度
-        ));
+        ];
+        $setting = array_merge($this->_socketOptions, $defaultSetting);
+        $client->set($setting);
 
         if (!$client->connect($sIp, $iPort, $timeout)) {
             $code = Code::TARS_SOCKET_CONNECT_FAILED;
@@ -355,15 +423,16 @@ class Communicator
 
     private function swooleCoroutineTcp($sIp, $iPort, $requestBuf, $timeout = 2)
     {
-        $client = new \Swoole\Coroutine\Client(SWOOLE_SOCK_TCP);
+        $type = SWOOLE_SOCK_TCP | SWOOLE_KEEP;
 
-//        $client->set(array(
-//            'open_length_check'     => 1,
-//            'package_length_type'   => 'N',
-//            'package_length_offset' => 0,       //第N个字节是包长度的值
-//            'package_body_offset'   => 0,       //第几个字节开始计算长度
-//            'package_max_length'    => 2000000,  //协议最大长度
-//        ));
+        if ($this->_socketSsl) {
+            $type = $type | SWOOLE_SSL;
+        }
+        $client = new \Swoole\Coroutine\Client($type);
+
+        $defaultSetting = [];
+        $setting = array_merge($this->_socketOptions, $defaultSetting);
+        $client->set($setting);
 
         if (!$client->connect($sIp, $iPort, $timeout)) {
             $code = Code::TARS_SOCKET_CONNECT_FAILED;
@@ -461,10 +530,11 @@ class Communicator
 
     private function swoolGrpc($ip, $port, $requestBuf, $timeout, $path)
     {
-        $cli = new \Swoole\Coroutine\Http2\Client($ip, $port, false);
-        $cli->set([
-            'timeout' => $timeout
-        ]);
+        $cli = new \Swoole\Coroutine\Http2\Client($ip, $port, $this->_socketSsl);
+        $defaultSetting = ['timeout' => $timeout];
+        $setting = array_merge($this->_socketOptions, $defaultSetting);
+        $cli->set($setting);
+
         $cli->connect();
         $req = new \swoole_http2_request;
         $req->method = 'POST';

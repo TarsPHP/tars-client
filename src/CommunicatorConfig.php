@@ -38,6 +38,8 @@ class CommunicatorConfig
 
     protected $socketMode = 1; //1 socket ,2 swoole sync ,3 swoole coroutine
     protected $iVersion = 1;
+    protected $socketSsl = false;
+    protected $socketOptions = [];
 
     public function __construct()
     {
@@ -327,5 +329,37 @@ class CommunicatorConfig
     public function setEnableTimer($enableTimer)
     {
         $this->enableTimer = $enableTimer;
+    }
+
+    /**
+     * @return array
+     */
+    public function getSocketOptions()
+    {
+        return $this->socketOptions;
+    }
+
+    /**
+     * @param array $socketOptions
+     */
+    public function setSocketOptions($socketOptions)
+    {
+        $this->socketOptions = $socketOptions;
+    }
+
+    /**
+     * @return bool
+     */
+    public function isSocketSsl()
+    {
+        return $this->socketSsl;
+    }
+
+    /**
+     * @param bool $socketSsl
+     */
+    public function setSocketSsl($socketSsl)
+    {
+        $this->socketSsl = $socketSsl;
     }
 }
